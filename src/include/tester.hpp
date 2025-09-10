@@ -20,6 +20,10 @@ private:
     float *Y_cpu_host = nullptr;
     float *Y_gpu_host = nullptr;
 
+    // bitmap
+    uint32_t *bitmap = nullptr;
+    auto GenerateBitMap() -> void;
+
     // helpers functions
     auto GetRandomMatrix() -> void;
     auto GetCompressedMatrix() -> void;

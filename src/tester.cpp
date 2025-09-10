@@ -16,6 +16,7 @@ auto SparseSgemvTester::RunTest() -> void {
     GetRandomMatrix();
     GetRandomVector();
     GetCompressedMatrix();
+    GenerateBitMap();
     // Print();
 
     std::cout << "======== CPU start ======\n";
@@ -103,6 +104,20 @@ auto SparseSgemvTester::GetCompressedMatrix() -> void {
     A_host_compressed_size_ = compressed_size;
 }
 
+auto SparseSgemvTester::GenerateBitMap() -> void {
+    int num_of_u32 = m_ * n_ / 32;
+    bitmap = (uint32_t *)malloc(num_of_u32 * sizeof(uint32_t));
+    for (int idx = 0; idx < num_of_u32; idx++) {
+        // for each u32
+        uint32_t u32_bitmap = 0;
+        for (int i = 0; i < 32; i++) {
+            if (A_host[idx * 32 + i])
+                u32_bitmap |= 1u << i;
+        }
+        bitmap[idx] = u32_bitmap;
+    }
+}
+
 auto SparseSgemvTester::GetRandomVector() -> void {
     X_host = (float *)malloc(m_ * 1 * sizeof(float));
 
@@ -125,6 +140,8 @@ auto SparseSgemvTester::Print() -> void {
 
     std::cout << "=========================\n";
 
+    // print the matrix A
+
     for (int i = 0; i < m_; i++) {
         for (int j = 0; j < n_; j++) {
             float val = A_host[i * n_ + j];
@@ -136,6 +153,8 @@ auto SparseSgemvTester::Print() -> void {
 
     std::cout << "=========================\n";
 
+    // print the vector x
+
     for (int i = 0; i < m_; i++) {
         float val = X_host[i];
         std::cout << std::setw(8) << std::fixed << std::setprecision(4) << val << " ";
@@ -144,6 +163,8 @@ auto SparseSgemvTester::Print() -> void {
 
     std::cout << "=========================\n";
 
+    // print the compressed matrix
+
     for (int i = 0; i < A_host_compressed_size_; i++) {
         float val = A_host_compressed[i];
         std::cout << std::setw(8) << std::fixed << std::setprecision(4) << val << " ";
@@ -151,6 +172,21 @@ auto SparseSgemvTester::Print() -> void {
             std::cout << "\n";
     }
     std::cout << "\n";
+
+    std::cout << "=========================\n";
+
+    // print the bitmap
+    for (int row = 0; row < m_; row++) {
+        for (int col = 0; col < n_; col++) {
+            int flatIdx = row * n_ + col;
+            int wordIdx = flatIdx / 32;
+            int bitIdx  = flatIdx % 32;
+
+            bool isNonZero = (bitmap[wordIdx] >> bitIdx) & 1u;
+            std::cout << (isNonZero ? 1 : 0) << " ";
+        }
+        std::cout << "\n";
+    }
 
 }
 
