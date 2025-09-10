@@ -1,10 +1,11 @@
 #include "tester.hpp"
+#include "kernel.hpp"
 
 SparseSgemvTester::SparseSgemvTester(int m, int n)
     : m_(m), n_(n) {
         // now we only test for 32-aligned sgemv
-        // assert(m % 32 == 0);
-        // assert(n % 32 == 0);
+        assert(m % 32 == 0);
+        assert(n % 32 == 0);
 }
 
 
@@ -15,11 +16,17 @@ auto SparseSgemvTester::RunTest() -> void {
     GetRandomMatrix();
     GetRandomVector();
     GetCompressedMatrix();
+    // Print();
+
+    std::cout << "======== CPU start ======\n";
     SgemvCPU();
-    Print();
-    PrintCPU();
+    SgemvGPU();
+
+    std::cout << "======== GPU start ======\n";
     
-    std::cout << "=========================\n";
+    CompareY();
+    
+    std::cout << "========== OK ===========\n";
 }
 
 auto SparseSgemvTester::SgemvCPU() -> void {
@@ -30,6 +37,22 @@ auto SparseSgemvTester::SgemvCPU() -> void {
             acc += X_host[j] * A_host[j * n_ + i];
         }
         Y_cpu_host[i] = acc;
+    }
+}
+
+auto SparseSgemvTester::SgemvGPU() -> void {
+    Y_gpu_host = (float *)malloc(1 * n_ * sizeof(float));
+    spmv_gpu(m_, n_, A_host, X_host, Y_gpu_host);
+}
+
+auto SparseSgemvTester::CompareY() -> void {
+    float max_diff = 0.0001f;
+    for (int i = 0; i < n_; i++) {
+        float diff = Y_cpu_host[i] - Y_gpu_host[i];
+        if (abs(diff) > max_diff) {
+            fprintf(stderr, "at [%d], cpu: %f, gpu: %f", i, Y_cpu_host[i], Y_gpu_host[i]);
+            exit(EXIT_FAILURE);
+        }
     }
 }
 

@@ -11,7 +11,10 @@ endif()
 add_executable(sparse_sgemv
   test/main.cpp
   src/tester.cpp
+  src/kernel.cu
 )
+
+set(CMAKE_CUDA_ARCHITECTURES 86)
 
 include_directories(${PROJECT_SOURCE_DIR}/src/include)
 

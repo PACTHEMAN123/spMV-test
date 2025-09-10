@@ -1,7 +1,7 @@
 #include "tester.hpp"
 
 int main() {
-    SparseSgemvTester tester(4, 8);
+    SparseSgemvTester tester(128, 512);
     tester.RunTest();
     return 0;
 }
