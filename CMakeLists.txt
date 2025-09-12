@@ -8,10 +8,17 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
+find_package(CUDAToolkit REQUIRED)
+
 add_executable(sparse_sgemv
   test/main.cpp
   src/tester.cpp
   src/kernel.cu
+)
+
+target_link_libraries(sparse_sgemv PRIVATE 
+  CUDA::cudart
+  CUDA::cublas
 )
 
 set(CMAKE_CUDA_ARCHITECTURES 86)

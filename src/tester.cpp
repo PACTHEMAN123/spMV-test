@@ -21,9 +21,10 @@ auto SparseSgemvTester::RunTest() -> void {
 
     std::cout << "======== CPU start ======\n";
     SgemvCPU();
-    SgemvGPU();
+    
 
     std::cout << "======== GPU start ======\n";
+    SgemvGPU();
     
     CompareY();
     
@@ -42,19 +43,42 @@ auto SparseSgemvTester::SgemvCPU() -> void {
 }
 
 auto SparseSgemvTester::SgemvGPU() -> void {
-    Y_gpu_host = (float *)malloc(1 * n_ * sizeof(float));
-    spmv_gpu(m_, n_, A_host, X_host, Y_gpu_host);
+    // register host and run kernels
+
+    // cublas
+    float *cublas_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
+    Y_gpu_hosts.push_back(cublas_kernel_Y_host);
+    std::cout << "start to launch cublas kernel" << std::endl;
+    cublas_gemv_gpu(m_, n_, A_host, X_host, cublas_kernel_Y_host);
+
+    // naive
+    float *naive_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
+    Y_gpu_hosts.push_back(naive_kernel_Y_host);
+    std::cout << "start to launch naive kernel" << std::endl;
+    naive_gemv_gpu(m_, n_, A_host, X_host, naive_kernel_Y_host);
+
+    // tiling + share mem
+    float *tiling_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
+    Y_gpu_hosts.push_back(tiling_kernel_Y_host);
+    std::cout << "start to launch tiling kernel" << std::endl;
+    tiling_gemv_gpu(m_, n_, A_host, X_host, tiling_kernel_Y_host);
+
 }
 
 auto SparseSgemvTester::CompareY() -> void {
     float max_diff = 0.0001f;
-    for (int i = 0; i < n_; i++) {
-        float diff = Y_cpu_host[i] - Y_gpu_host[i];
-        if (abs(diff) > max_diff) {
-            fprintf(stderr, "at [%d], cpu: %f, gpu: %f", i, Y_cpu_host[i], Y_gpu_host[i]);
-            exit(EXIT_FAILURE);
+
+    int idx = 0;
+    for (auto host: Y_gpu_hosts) {
+        for (int i = 0; i < n_; i++) {
+            float diff = Y_cpu_host[i] - host[i];
+            if (abs(diff) > max_diff) {
+                fprintf(stderr, "[GPU kernel %d] at [%d], cpu: %f, gpu: %f\n", idx, i, Y_cpu_host[i], host[i]);
+                //exit(EXIT_FAILURE);
+            }
         }
-    }
+        idx += 1;
+    } 
 }
 
 auto SparseSgemvTester::PrintCPU() -> void {

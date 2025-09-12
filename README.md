@@ -1,4 +1,4 @@
-# cuda kernel for sparisty SGEMV
+# cuda kernel for sparse SGEMV
 
 ## build
 

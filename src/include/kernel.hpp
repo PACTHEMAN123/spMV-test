@@ -1,10 +1,13 @@
 #pragma once
 #include <cuda_runtime.h>
 #include <cstdio>
+#include <iostream>
+#include <cublas_v2.h>
 
 // GPU kernel launcher
-void spmv_gpu(int M, int N, float *A, float *X, float *Y);
-
+void tiling_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_host);
+void cublas_gemv_gpu(int M, int N, float *A, float *X, float *Y);
+void naive_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_host);
 
 // cuda check
 #define CUDA_CHECK(call) \
@@ -15,3 +18,23 @@ void spmv_gpu(int M, int N, float *A, float *X, float *Y);
         exit(EXIT_FAILURE); \
     } \
 }
+
+// cuda kernel run time
+#define TIME_KERNEL(kernel_call)                                             \
+    {                                                                     \
+        cudaEvent_t start, stop;                                             \
+        CUDA_CHECK(cudaEventCreate(&start));                                 \
+        CUDA_CHECK(cudaEventCreate(&stop));                                  \
+                                                                             \
+        CUDA_CHECK(cudaEventRecord(start));                                  \
+        (kernel_call);                                                         \
+        CUDA_CHECK(cudaEventRecord(stop));                                   \
+        CUDA_CHECK(cudaEventSynchronize(stop));                              \
+                                                                             \
+        float ms = 0.0f;                                                     \
+        CUDA_CHECK(cudaEventElapsedTime(&ms, start, stop));                  \
+        std::cout << #kernel_call << " took " << ms << " ms" << std::endl;   \
+                                                                             \
+        cudaEventDestroy(start);                                             \
+        cudaEventDestroy(stop);                                              \
+    }
