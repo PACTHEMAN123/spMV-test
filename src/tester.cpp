@@ -45,17 +45,17 @@ auto SparseSgemvTester::SgemvCPU() -> void {
 auto SparseSgemvTester::SgemvGPU() -> void {
     // register host and run kernels
 
-    // cublas
-    float *cublas_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
-    Y_gpu_hosts.push_back(cublas_kernel_Y_host);
-    std::cout << "start to launch cublas kernel" << std::endl;
-    cublas_gemv_gpu(m_, n_, A_host, X_host, cublas_kernel_Y_host);
-
     // naive
     float *naive_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
     Y_gpu_hosts.push_back(naive_kernel_Y_host);
     std::cout << "start to launch naive kernel" << std::endl;
     naive_gemv_gpu(m_, n_, A_host, X_host, naive_kernel_Y_host);
+
+    // cublas
+    float *cublas_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
+    Y_gpu_hosts.push_back(cublas_kernel_Y_host);
+    std::cout << "start to launch cublas kernel" << std::endl;
+    cublas_gemv_gpu(m_, n_, A_host, X_host, cublas_kernel_Y_host);
 
     // tiling + share mem
     float *tiling_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
@@ -63,6 +63,11 @@ auto SparseSgemvTester::SgemvGPU() -> void {
     std::cout << "start to launch tiling kernel" << std::endl;
     tiling_gemv_gpu(m_, n_, A_host, X_host, tiling_kernel_Y_host);
 
+    // naive csr
+    float *csr_naive_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
+    Y_gpu_hosts.push_back(csr_naive_kernel_Y_host);
+    std::cout << "start to launch csr naive kernel" << std::endl;
+    csr_naive_gemv_gpu(m_, n_, A_host, X_host, csr_naive_kernel_Y_host);
 }
 
 auto SparseSgemvTester::CompareY() -> void {
