@@ -68,6 +68,12 @@ auto SparseSgemvTester::SgemvGPU() -> void {
     Y_gpu_hosts.push_back(csr_naive_kernel_Y_host);
     std::cout << "start to launch csr naive kernel" << std::endl;
     csr_naive_gemv_gpu(m_, n_, A_host, X_host, csr_naive_kernel_Y_host);
+
+    // csr + tiling
+    float *csr_tiling_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
+    Y_gpu_hosts.push_back(csr_tiling_kernel_Y_host);
+    std::cout << "start to launch csr tiling kernel" << std::endl;
+    csr_tiling_gemv_gpu(m_, n_, A_host, X_host, csr_tiling_kernel_Y_host);
 }
 
 auto SparseSgemvTester::CompareY() -> void {
@@ -102,7 +108,7 @@ auto SparseSgemvTester::PrintCPU() -> void {
 auto SparseSgemvTester::GetRandomMatrix() -> void {
     A_host = (float *)malloc(m_ * n_ * sizeof(float));
 
-    double sparsity_ratio = 0.7;
+    double sparsity_ratio = 0.5;
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> valueDist(-1.0f, 1.0f);   // 非零元素的值分布
@@ -150,7 +156,7 @@ auto SparseSgemvTester::GenerateBitMap() -> void {
 auto SparseSgemvTester::GetRandomVector() -> void {
     X_host = (float *)malloc(m_ * 1 * sizeof(float));
 
-    double sparsity_ratio = 0.2;
+    double sparsity_ratio = 0.5;
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> valueDist(-1.0f, 1.0f);   // 非零元素的值分布

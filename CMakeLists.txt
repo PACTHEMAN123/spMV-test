@@ -18,6 +18,7 @@ add_executable(sparse_sgemv
   src/kernels/naive.cu
   src/kernels/tiling_smem.cu
   src/kernels/csr_naive.cu
+  src/kernels/csr_tiling.cu
 )
 
 target_link_libraries(sparse_sgemv PRIVATE 
