@@ -11,8 +11,6 @@ __global__ void csr_tiling_kernel(
     uint32_t *A_bmp,
     float *X, float *Y
 ) {
-    // block size: 32 * 32 threads
-
     // buffers
     __shared__ float ldg_x_buffer[32];
     __shared__ float ldg_a_buffer[32][32];
@@ -28,9 +26,9 @@ __global__ void csr_tiling_kernel(
         // load the x
         ldg_x_buffer[threadIdx.x] = X[block_ks + threadIdx.x];
 
-        // load the column-major bitmap
+        // load the block-wise column-major bitmap
         int ax = blockIdx.x * blockDim.x + threadIdx.x;
-        int bmp_idx = ax * (M / 32) + block_ks / 32;
+        int bmp_idx = blockIdx.x * M + block_ks + threadIdx.x;
         uint32_t bmp = A_bmp[bmp_idx];
 
         // reset the A
@@ -77,17 +75,26 @@ std::vector<uint32_t> gen_csr_bitmap(int M, int N, float *matrix) {
     int num_of_u32 = M * N / 32;
     std::vector<uint32_t> bitmap(num_of_u32, 0);
 
+    // we will iter by block (column major)
     int bit_index = 0;
-    for (int i = 0; i < N; i++) {
-        for (int j = 0; j < M; j++) {
-            int word = bit_index / 32;
-            int offset = bit_index % 32;
-            if (matrix[j * N + i] != 0.0f) {
-                bitmap[word] |= (1u << offset);
+    for (int block_x = 0; block_x < N; block_x += 32) {
+        for (int block_y = 0; block_y < M; block_y += 32) {
+            // for each block, arrange bitmap by thread ID order
+            for (int i = 0; i < 32; i++) {
+                for (int j = 0; j < 32; j++) {
+                    int word = bit_index / 32;
+                    int offset = bit_index % 32;
+                    int ax = block_x + i;
+                    int ay = block_y + j;
+                    if (matrix[ay * N + ax] != 0.0f) {
+                        bitmap[word] |= (1u << offset);
+                    }
+                    bit_index += 1;
+                }
             }
-            bit_index += 1;
         }
     }
+
     return bitmap;
 }
 
