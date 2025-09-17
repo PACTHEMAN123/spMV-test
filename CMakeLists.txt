@@ -14,6 +14,7 @@ add_executable(sparse_sgemv
   test/main.cpp
   src/tester.cpp
   src/matrix_csr.cpp
+  src/tcsr.cpp
   src/kernels/cublas.cu
   src/kernels/naive.cu
   src/kernels/tiling_smem.cu

@@ -1,120 +1,133 @@
 #include "kernel.hpp"
 #include "matrix_csr.hpp"
+#include "tcsr.hpp"
 #include <stdio.h>
 
+// small tricks to accelerate :)
+__device__ int warp_prefix_sum(int val) {
+    unsigned mask = 0xffffffff; // full warp, 32 threads
+    for (int offset = 1; offset < 32; offset <<= 1) {
+        int n = __shfl_up_sync(mask, val, offset);
+        if (threadIdx.x % 32 >= offset) val += n;
+    }
+    return val;
+}
 
-// using CSR format, naive
+void __device__ print_smem(float *smem) {
+    if (threadIdx.x == 0) {
+        printf("smem [%f, %f, %f, %f, %f, %f, %f, %f]", smem[0], smem[1], smem[2], smem[3], smem[4], smem[5], smem[6], smem[7]);
+    }
+}
+
+
+// using CSR format and tiling method
 __global__ void csr_tiling_kernel(
     int M, int N, 
     float *A_vals, int A_vals_size, 
-    int *A_row_ptrs, int A_row_ptrs_size,
+    int *A_blk_idxs, int A_blkidx_size,
     uint32_t *A_bmp,
     float *X, float *Y
 ) {
+    // IDs
+    int warp_id = threadIdx.x / 32;
+    int lane_id = threadIdx.x % 32; 
+
     // buffers
     __shared__ float ldg_x_buffer[32];
     __shared__ float ldg_a_buffer[32][32];
+    __shared__ uint32_t ldg_bmp_buffer[32];
+    // count how many value in this tile
+    __shared__ int num_nz[32];
+    // count how many value before this tile
+    __shared__ int sum_nz[32];
     float acc = 0.0f;
 
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int begin = A_row_ptrs[idx];
     // printf("[%d] global (%d, %d)\n", threadIdx.x, begin, end);
-
-    int cur_begin = begin; 
     #pragma unroll
     for (int block_ks = 0; block_ks < M; block_ks += 32) {
-        // load the x
-        ldg_x_buffer[threadIdx.x] = X[block_ks + threadIdx.x];
 
-        // load the block-wise column-major bitmap
-        int ax = blockIdx.x * blockDim.x + threadIdx.x;
-        int bmp_idx = blockIdx.x * M + block_ks + threadIdx.x;
-        uint32_t bmp = A_bmp[bmp_idx];
-
-        // reset the A
-        #pragma unroll 32
-        for (int i = 0; i < 32; i++) {
-            ldg_a_buffer[i][threadIdx.x] = 0.0f;
+        if (warp_id == 0) {
+            // load the x
+            ldg_x_buffer[lane_id] = X[block_ks + lane_id];
+        }
+        
+        if (warp_id == 1) {
+            // load the block-wise column-major bitmap
+            int ax = blockIdx.x * blockDim.x + lane_id;
+            int bmp_idx = blockIdx.x * M + block_ks + lane_id;
+            ldg_bmp_buffer[lane_id] = A_bmp[bmp_idx];
+            num_nz[lane_id] = __popc(ldg_bmp_buffer[lane_id]);
+            sum_nz[lane_id] = warp_prefix_sum(num_nz[lane_id]);
         }
 
-        // count how many elemens in this tile
-        int num_nz = __popc(bmp);
-        int cur_end = cur_begin + num_nz;
-
-        // printf("[%d] bmp %x, cur (%d, %d)\n", threadIdx.x, bmp,cur_begin, cur_end);
-
-        // selectively load the A from global to smem
-        int cnt = 0;
-        #pragma unroll 32
-        for (int offset = 0; offset < 32; offset++) {
-            uint32_t mask = 1u << offset;
-            if (mask & bmp) {
-                ldg_a_buffer[offset][threadIdx.x] = A_vals[cur_begin + cnt];
-                cnt += 1;
+        if (warp_id == 2) {
+            // reset the A
+            #pragma unroll 32
+            for (int i = 0; i < 32; i++) {
+                ldg_a_buffer[i][lane_id] = 0.0f;
             }
         }
+        
+        __syncthreads();
 
-        // printf("[%d] cnt: %d, pop_cnt: %d\n", threadIdx.x, cnt, num_nz);
+        // load the A from global to share memory
+        uint32_t one_bit_mask = 1u << lane_id;
+        uint32_t length_mask = (lane_id == 0) ? 0 : ((1u << lane_id) - 1);
+        // the begin idx in values of this block
+        int block_begin_idx = A_blk_idxs[blockIdx.x * (M / 32) + block_ks / 32];
+        // if (threadIdx.x == 0) {
+        //     printf("[%d] block_idx %d\n", blockIdx.x, block_begin_idx);
+        // }
+        for (int i = 0; i < 4; i++) {
+            int tile_id = 4 * warp_id + i;
+            int begin = sum_nz[tile_id] - num_nz[tile_id];
+            uint32_t bitmap = ldg_bmp_buffer[tile_id];
+            int cnt = __popc(bitmap & length_mask);
+            if (one_bit_mask & bitmap) {
+                ldg_a_buffer[lane_id][tile_id] = A_vals[block_begin_idx + begin + cnt];
+            }
+        }
 
         __syncthreads();
 
         // compute
-        #pragma unroll 32
-        for (int i = 0; i < 32; i++) {
-            acc += ldg_x_buffer[i] * ldg_a_buffer[i][threadIdx.x];
-        }
-
-        // update iters
-        cur_begin += num_nz;
-    }
-
-    Y[blockIdx.x * blockDim.x + threadIdx.x] = acc;
-}
-
-std::vector<uint32_t> gen_csr_bitmap(int M, int N, float *matrix) {
-    int num_of_u32 = M * N / 32;
-    std::vector<uint32_t> bitmap(num_of_u32, 0);
-
-    // we will iter by block (column major)
-    int bit_index = 0;
-    for (int block_x = 0; block_x < N; block_x += 32) {
-        for (int block_y = 0; block_y < M; block_y += 32) {
-            // for each block, arrange bitmap by thread ID order
+        // todo: use parrelled compute
+        if (warp_id == 0) {
+            #pragma unroll 32
             for (int i = 0; i < 32; i++) {
-                for (int j = 0; j < 32; j++) {
-                    int word = bit_index / 32;
-                    int offset = bit_index % 32;
-                    int ax = block_x + i;
-                    int ay = block_y + j;
-                    if (matrix[ay * N + ax] != 0.0f) {
-                        bitmap[word] |= (1u << offset);
-                    }
-                    bit_index += 1;
-                }
+                acc += ldg_x_buffer[i] * ldg_a_buffer[i][lane_id];
+                // if (blockIdx.x == 1 && threadIdx.x == 0) {
+                //     printf("thread [%2d][%2d] in block %d, (%f)*(%f), cur_acc: %f\n", warp_id, lane_id, blockIdx.x, ldg_x_buffer[i], ldg_a_buffer[i][lane_id], acc);
+                // }
             }
         }
+
+        __syncthreads();
     }
 
-    return bitmap;
+    __syncthreads();
+
+    if (warp_id == 0) {
+        // printf("Y[%d] acc %f\n", blockIdx.x * blockDim.x + lane_id, acc);
+        Y[blockIdx.x * 32 + lane_id] = acc;
+    }
 }
 
-
 void csr_tiling_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_host) {
-    dim3 block(32, 1, 1);
+    dim3 block(256, 1, 1);
     dim3 grid(N / 32);
 
-    CSRMatrix csr(M, N, A_host);
-    auto csr_bmp = gen_csr_bitmap(M, N, A_host);
+    TCSRMatrix tcsr(M, N, A_host);
 
-    const size_t size_A_row_ptrs = csr.RowPtrsSize() * sizeof(int);
-    const size_t size_A_values = csr.ValuesSize() * sizeof(float);
-    const size_t size_A_bitmap = csr_bmp.size() * sizeof(uint32_t);
+    const size_t size_A_blkidx = tcsr.BlkIdxSize() * sizeof(int);
+    const size_t size_A_values = tcsr.ValuesSize() * sizeof(float);
+    const size_t size_A_bitmap = tcsr.BitmapsSize() * sizeof(uint32_t);
 
     float *A_values_device;
-    int *A_row_ptrs_device;
+    int *A_blkidx_device;
     uint32_t *A_bmp_device;
     CUDA_CHECK(cudaMalloc((void **)&A_values_device, size_A_values));
-    CUDA_CHECK(cudaMalloc((void **)&A_row_ptrs_device, size_A_row_ptrs));
+    CUDA_CHECK(cudaMalloc((void **)&A_blkidx_device, size_A_blkidx));
     CUDA_CHECK(cudaMalloc((void **)&A_bmp_device, size_A_bitmap));
 
     const size_t size_X = M * sizeof(float);
@@ -124,9 +137,9 @@ void csr_tiling_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_ho
     CUDA_CHECK(cudaMalloc((void **)&X_device, size_X));
     CUDA_CHECK(cudaMalloc((void **)&Y_device, size_Y));
 
-    CUDA_CHECK(cudaMemcpy(A_values_device, csr.GetValues(), size_A_values, cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(A_row_ptrs_device, csr.GetRowPtrs(), size_A_row_ptrs, cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(A_bmp_device, csr_bmp.data(), size_A_bitmap, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(A_values_device, tcsr.GetValues(), size_A_values, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(A_blkidx_device, tcsr.GetBlkIdx(), size_A_blkidx, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(A_bmp_device, tcsr.GetBitmaps(), size_A_bitmap, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(X_device, X_host, size_X, cudaMemcpyHostToDevice));
 
     CUDA_CHECK(cudaDeviceSynchronize());
@@ -134,8 +147,8 @@ void csr_tiling_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_ho
     // call the kernel
     TIME_KERNEL((csr_tiling_kernel<<<grid, block>>>(
         M, N, 
-        A_values_device, csr.ValuesSize(),
-        A_row_ptrs_device, csr.RowPtrsSize(),
+        A_values_device, tcsr.ValuesSize(),
+        A_blkidx_device, tcsr.BlkIdxSize(),
         A_bmp_device,
         X_device, Y_device
     )));
@@ -145,7 +158,7 @@ void csr_tiling_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_ho
     CUDA_CHECK(cudaMemcpy(Y_host, Y_device, size_Y, cudaMemcpyDeviceToHost));
 
     CUDA_CHECK(cudaFree(A_values_device));
-    CUDA_CHECK(cudaFree(A_row_ptrs_device));
+    CUDA_CHECK(cudaFree(A_blkidx_device));
     CUDA_CHECK(cudaFree(X_device));
     CUDA_CHECK(cudaFree(Y_device));
 
