@@ -2,11 +2,11 @@
 #include "matrix_csr.hpp"
 #include <stdio.h>
 
+
 // using CSR format, naive
 __global__ void csr_tiling_kernel(
     int M, int N, 
     float *A_vals, int A_vals_size, 
-    int *A_col_idxs, int A_col_idxs_size,
     int *A_row_ptrs, int A_row_ptrs_size,
     uint32_t *A_bmp,
     float *X, float *Y
@@ -20,7 +20,6 @@ __global__ void csr_tiling_kernel(
 
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int begin = A_row_ptrs[idx];
-    int end = (idx == N - 1) ? A_col_idxs_size : A_row_ptrs[idx + 1];
     // printf("[%d] global (%d, %d)\n", threadIdx.x, begin, end);
 
     int cur_begin = begin; 
@@ -35,7 +34,7 @@ __global__ void csr_tiling_kernel(
         uint32_t bmp = A_bmp[bmp_idx];
 
         // reset the A
-        #pragma unroll
+        #pragma unroll 32
         for (int i = 0; i < 32; i++) {
             ldg_a_buffer[i][threadIdx.x] = 0.0f;
         }
@@ -44,22 +43,31 @@ __global__ void csr_tiling_kernel(
         int num_nz = __popc(bmp);
         int cur_end = cur_begin + num_nz;
 
-        // printf("[%d] cur (%d, %d)\n", threadIdx.x, cur_begin, cur_end);
+        // printf("[%d] bmp %x, cur (%d, %d)\n", threadIdx.x, bmp,cur_begin, cur_end);
 
         // selectively load the A from global to smem
-        for (int i = cur_begin; i < cur_end; i++) {
-            ldg_a_buffer[A_col_idxs[i] % 32][threadIdx.x] = A_vals[i];
+        int cnt = 0;
+        #pragma unroll 32
+        for (int offset = 0; offset < 32; offset++) {
+            uint32_t mask = 1u << offset;
+            if (mask & bmp) {
+                ldg_a_buffer[offset][threadIdx.x] = A_vals[cur_begin + cnt];
+                cnt += 1;
+            }
         }
+
+        // printf("[%d] cnt: %d, pop_cnt: %d\n", threadIdx.x, cnt, num_nz);
 
         __syncthreads();
 
         // compute
+        #pragma unroll 32
         for (int i = 0; i < 32; i++) {
             acc += ldg_x_buffer[i] * ldg_a_buffer[i][threadIdx.x];
         }
 
         // update iters
-        cur_begin = cur_end;
+        cur_begin += num_nz;
     }
 
     Y[blockIdx.x * blockDim.x + threadIdx.x] = acc;
@@ -92,15 +100,13 @@ void csr_tiling_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_ho
     auto csr_bmp = gen_csr_bitmap(M, N, A_host);
 
     const size_t size_A_row_ptrs = csr.RowPtrsSize() * sizeof(int);
-    const size_t size_A_col_idxs = csr.ColIdxsSize() * sizeof(int);
     const size_t size_A_values = csr.ValuesSize() * sizeof(float);
     const size_t size_A_bitmap = csr_bmp.size() * sizeof(uint32_t);
 
     float *A_values_device;
-    int *A_col_idxs_device, *A_row_ptrs_device;
+    int *A_row_ptrs_device;
     uint32_t *A_bmp_device;
     CUDA_CHECK(cudaMalloc((void **)&A_values_device, size_A_values));
-    CUDA_CHECK(cudaMalloc((void **)&A_col_idxs_device, size_A_col_idxs));
     CUDA_CHECK(cudaMalloc((void **)&A_row_ptrs_device, size_A_row_ptrs));
     CUDA_CHECK(cudaMalloc((void **)&A_bmp_device, size_A_bitmap));
 
@@ -112,7 +118,6 @@ void csr_tiling_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_ho
     CUDA_CHECK(cudaMalloc((void **)&Y_device, size_Y));
 
     CUDA_CHECK(cudaMemcpy(A_values_device, csr.GetValues(), size_A_values, cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(A_col_idxs_device, csr.GetColIdxs(), size_A_col_idxs, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(A_row_ptrs_device, csr.GetRowPtrs(), size_A_row_ptrs, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(A_bmp_device, csr_bmp.data(), size_A_bitmap, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(X_device, X_host, size_X, cudaMemcpyHostToDevice));
@@ -123,7 +128,6 @@ void csr_tiling_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_ho
     TIME_KERNEL((csr_tiling_kernel<<<grid, block>>>(
         M, N, 
         A_values_device, csr.ValuesSize(),
-        A_col_idxs_device, csr.ColIdxsSize(),
         A_row_ptrs_device, csr.RowPtrsSize(),
         A_bmp_device,
         X_device, Y_device
@@ -134,7 +138,6 @@ void csr_tiling_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_ho
     CUDA_CHECK(cudaMemcpy(Y_host, Y_device, size_Y, cudaMemcpyDeviceToHost));
 
     CUDA_CHECK(cudaFree(A_values_device));
-    CUDA_CHECK(cudaFree(A_col_idxs_device));
     CUDA_CHECK(cudaFree(A_row_ptrs_device));
     CUDA_CHECK(cudaFree(X_device));
     CUDA_CHECK(cudaFree(Y_device));
