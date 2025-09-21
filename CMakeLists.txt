@@ -15,11 +15,13 @@ add_executable(sparse_sgemv
   src/tester.cpp
   src/matrix_csr.cpp
   src/tcsr.cpp
+  src/wsp.cpp
   src/kernels/cublas.cu
   src/kernels/naive.cu
   src/kernels/tiling_smem.cu
   src/kernels/csr_naive.cu
   src/kernels/csr_tiling.cu
+  src/kernels/wsp.cu
 )
 
 target_link_libraries(sparse_sgemv PRIVATE 

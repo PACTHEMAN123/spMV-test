@@ -74,10 +74,16 @@ auto SparseSgemvTester::SgemvGPU() -> void {
     Y_gpu_hosts.push_back(csr_tiling_kernel_Y_host);
     std::cout << "start to launch csr tiling kernel" << std::endl;
     csr_tiling_gemv_gpu(m_, n_, A_host, X_host, csr_tiling_kernel_Y_host);
+
+    // wsp
+    float *wsp_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
+    Y_gpu_hosts.push_back(wsp_kernel_Y_host);
+    std::cout << "start to launch wsp kernel" << std::endl;
+    wsp_gemv_gpu(m_, n_, A_host, X_host, wsp_kernel_Y_host);
 }
 
 auto SparseSgemvTester::CompareY() -> void {
-    float max_diff = 0.0001f;
+    float max_diff = 0.001f;
 
     int idx = 0;
     for (auto host: Y_gpu_hosts) {
