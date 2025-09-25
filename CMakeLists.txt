@@ -1,3 +1,5 @@
+set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc CACHE FILEPATH "nvcc compiler")
+
 cmake_minimum_required(VERSION 3.18)
 project(sparse_sgemv LANGUAGES CXX CUDA)
 
@@ -16,12 +18,14 @@ add_executable(sparse_sgemv
   src/matrix_csr.cpp
   src/tcsr.cpp
   src/wsp.cpp
+  src/asp.cpp
   src/kernels/cublas.cu
   src/kernels/naive.cu
   src/kernels/tiling_smem.cu
   src/kernels/csr_naive.cu
   src/kernels/csr_tiling.cu
   src/kernels/wsp.cu
+  src/kernels/asp.cu
 )
 
 target_link_libraries(sparse_sgemv PRIVATE 
@@ -40,3 +44,4 @@ include_directories(${PROJECT_SOURCE_DIR}/src/include)
 
 target_include_directories(sparse_sgemv PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set_target_properties(sparse_sgemv PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+set_target_properties(sparse_sgemv PROPERTIES CUDA_ARCHITECTURES "86")

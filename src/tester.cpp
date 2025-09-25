@@ -80,6 +80,12 @@ auto SparseSgemvTester::SgemvGPU() -> void {
     Y_gpu_hosts.push_back(wsp_kernel_Y_host);
     std::cout << "start to launch wsp kernel" << std::endl;
     wsp_gemv_gpu(m_, n_, A_host, X_host, wsp_kernel_Y_host);
+
+    // asp
+    float *asp_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
+    Y_gpu_hosts.push_back(asp_kernel_Y_host);
+    std::cout << "start to launch asp kernel" << std::endl;
+    asp_gemv_gpu(m_, n_, A_host, X_host, asp_kernel_Y_host);
 }
 
 auto SparseSgemvTester::CompareY() -> void {
