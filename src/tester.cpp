@@ -92,6 +92,12 @@ auto SparseSgemvTester::SgemvGPU() -> void {
     Y_gpu_hosts.push_back(asp1_kernel_Y_host);
     std::cout << "start to launch asp v1 kernel" << std::endl;
     asp_gemv_gpu(m_, n_, A_host, X_host, asp1_kernel_Y_host, 1);
+
+    // asp v2
+    float *asp2_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
+    Y_gpu_hosts.push_back(asp2_kernel_Y_host);
+    std::cout << "start to launch asp v2 kernel" << std::endl;
+    asp_gemv_gpu(m_, n_, A_host, X_host, asp2_kernel_Y_host, 2);
 }
 
 auto SparseSgemvTester::CompareY() -> void {
