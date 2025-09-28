@@ -1,7 +1,7 @@
 #include "kernel.hpp"
 #include "wsp.hpp"
 
-__global__ void wsp_kernel(
+__global__ void wsp_kernel_v0(
     int M, int N,
     int nz_max_m,
     uint32_t *bitmaps,
@@ -55,7 +55,87 @@ __global__ void wsp_kernel(
         Y[cur_col] = sum;
 }
 
-void wsp_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_host) {
+// weight sparse kernel: using pipeline
+__global__ void wsp_kernel_v1(
+    int M, int N,
+    int nz_max_m,
+    uint32_t *bitmaps,
+    float* A_vals,
+    float *X, float *Y
+) {
+    int lane_id = threadIdx.x % 32;
+    int warp_id = threadIdx.x / 32;
+    int cur_col = blockIdx.x * 4 + warp_id;
+
+    uint32_t curr_mask = (1u << lane_id);
+    uint32_t prev_mask = (lane_id == 0) ? 0 : ((1u << lane_id) - 1);
+
+    int A_val_row_cnt = 0;
+    float sum = 0;
+    float *X_ptr = X + lane_id;
+    float *A_ptr = A_vals + nz_max_m * cur_col;
+
+    float A_buf[2] = {0};
+    float X_buf[2] = {0};
+
+    
+
+    for (int out_bk = 0; out_bk < M; out_bk += 32 * 32) {
+        int bmp_start = cur_col * (M / 32) + out_bk / 32;
+        uint32_t bitmap = bitmaps[bmp_start + lane_id];
+
+        int stage = 0;
+
+        // head stage: load the first 32 A and X
+        uint32_t first_bitmap =  __shfl_sync(0xffffffff, bitmap, 0);
+        if (first_bitmap & curr_mask) {
+            X_buf[stage] = *X_ptr;
+            int A_val_in_blk_offset = __popc(first_bitmap & prev_mask);
+            A_buf[stage] = A_ptr[A_val_in_blk_offset];
+        }
+        X_ptr += 32;
+        int cur_nz_num = __popc(first_bitmap);
+        A_val_row_cnt += cur_nz_num; A_ptr += cur_nz_num;
+        stage ^= 1;
+
+        // main loop
+        for (int i = 0; i < 31; i++) {
+
+            // compute
+            uint32_t cur_bitmap = __shfl_sync(0xffffffff, bitmap, i); 
+            if (cur_bitmap & curr_mask) {
+                sum += X_buf[stage ^ 1] * A_buf[stage ^ 1];
+            }
+
+            // load next
+            uint32_t next_bitmap = __shfl_sync(0xffffffff, bitmap, i + 1);
+            if (next_bitmap & curr_mask) {
+                X_buf[stage] = *X_ptr;
+                int A_val_in_blk_offset = __popc(next_bitmap & prev_mask);
+                A_buf[stage] = A_ptr[A_val_in_blk_offset];
+            }
+            X_ptr += 32;
+            int cur_nz_num = __popc(next_bitmap);
+            A_val_row_cnt += cur_nz_num; A_ptr += cur_nz_num;
+            stage ^= 1;
+        }
+
+        // tail stage: no need to load the next
+        uint32_t end_bitmap = __shfl_sync(0xffffffff, bitmap, 31);
+        if (end_bitmap & curr_mask) {
+            sum += X_buf[stage ^ 1] * A_buf[stage ^ 1];
+        }
+    }
+
+    for (int i = 16; i >= 1; i >>= 1) {
+        sum += __shfl_xor_sync(0xffffffff, sum, i);
+    }
+
+    if (lane_id == 0)
+        Y[cur_col] = sum;
+}
+
+void wsp_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_host, int version) {
     dim3 block(128, 1, 1);
     dim3 grid(N / 4, 1, 1);
 
@@ -82,13 +162,31 @@ void wsp_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_host) {
 
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    TIME_KERNEL((wsp_kernel<<<grid, block>>>(
-        M, N, 
-        wsp.nz_max_m,
-        A_bmp_dev,
-        A_val_dev,
-        X_device, Y_device
-    )));
+    switch (version)
+    {
+        case 0:
+            TIME_KERNEL((wsp_kernel_v0<<<grid, block>>>(
+                M, N, 
+                wsp.nz_max_m,
+                A_bmp_dev,
+                A_val_dev,
+                X_device, Y_device
+            )));
+            break;
+        case 1:
+            TIME_KERNEL((wsp_kernel_v1<<<grid, block>>>(
+                M, N, 
+                wsp.nz_max_m,
+                A_bmp_dev,
+                A_val_dev,
+                X_device, Y_device
+            )));
+            break;
+        default:
+            break;
+    }
+
+    
 
     CUDA_CHECK(cudaDeviceSynchronize());
 
