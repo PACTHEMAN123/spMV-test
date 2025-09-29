@@ -1,5 +1,6 @@
 #include "awsp.hpp"
 #include "kernel.hpp"
+#include "ptx.hpp"
 
 __global__ void awsp_kernel_v0(
     int M, int N,
@@ -84,11 +85,11 @@ __global__ void awsp_kernel_v1(
     float A_buf[32]; // only use to compute
 
     // head stage 0: load the x and bitmap for compute
-    X_buf[0] = *X_ptr; X_ptr += 32;
-    B_buf[0] = *B_ptr; B_ptr += 32;
+    LDG_F_CA_32(X_ptr, X_buf[0]); X_ptr += 32;
+    LDG_U_CA_32(B_ptr, B_buf[0]); B_ptr += 32;
     // head stage 1: load x and bitmap for next load
-    X_buf[1] = X_buf[0]; X_buf[0] = *X_ptr; X_ptr += 32;
-    B_buf[1] = B_buf[0]; B_buf[0] = *B_ptr; B_ptr += 32;
+    X_buf[1] = X_buf[0]; LDG_F_CA_32(X_ptr, X_buf[0]); X_ptr += 32;
+    B_buf[1] = B_buf[0]; LDG_U_CA_32(B_ptr, B_buf[0]); B_ptr += 32;
     // head stage 2: load A for compute
     int first_bk_offset = 0;
     for (int i = 0; i < 32; i++) {
@@ -109,8 +110,8 @@ __global__ void awsp_kernel_v1(
     // main pipeline
     for (int out_bk = 0; out_bk < (M/4 - 32*2); out_bk += 32) {
         // load the x and bitmap for next load
-        X_buf[2] = X_buf[1]; X_buf[1] = X_buf[0]; X_buf[0] = *X_ptr; X_ptr += 32;
-        B_buf[2] = B_buf[1]; B_buf[1] = B_buf[0]; B_buf[0] = *B_ptr; B_ptr += 32;
+        X_buf[2] = X_buf[1]; X_buf[1] = X_buf[0]; LDG_F_CA_32(X_ptr, X_buf[0]); X_ptr += 32;
+        B_buf[2] = B_buf[1]; B_buf[1] = B_buf[0]; LDG_U_CA_32(B_ptr, B_buf[0]); B_ptr += 32;
 
         int next_bk_offset = 0;
         for (int i = 0; i < 32; i++) {
