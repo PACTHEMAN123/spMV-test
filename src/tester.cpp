@@ -110,6 +110,12 @@ auto SparseSgemvTester::SgemvGPU() -> void {
     Y_gpu_hosts.push_back(awsp1_kernel_Y_host);
     std::cout << "start to launch awsp v1 kernel" << std::endl;
     awsp_gemv_gpu(m_, n_, A_host, X_host, awsp1_kernel_Y_host, 1);
+
+    // awsp v2
+    float *awsp2_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
+    Y_gpu_hosts.push_back(awsp2_kernel_Y_host);
+    std::cout << "start to launch awsp v2 kernel" << std::endl;
+    awsp_gemv_gpu(m_, n_, A_host, X_host, awsp2_kernel_Y_host, 2);
 }
 
 auto SparseSgemvTester::CompareY() -> void {
