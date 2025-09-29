@@ -12,6 +12,7 @@ void csr_naive_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_hos
 void csr_tiling_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_host);
 void wsp_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_host, int version);
 void asp_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_host, int version);
+void awsp_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_host, int version);
 
 // cuda check
 #define CUDA_CHECK(call) \

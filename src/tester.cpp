@@ -69,12 +69,6 @@ auto SparseSgemvTester::SgemvGPU() -> void {
     std::cout << "start to launch csr naive kernel" << std::endl;
     csr_naive_gemv_gpu(m_, n_, A_host, X_host, csr_naive_kernel_Y_host);
 
-    // csr + tiling
-    float *csr_tiling_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
-    Y_gpu_hosts.push_back(csr_tiling_kernel_Y_host);
-    std::cout << "start to launch csr tiling kernel" << std::endl;
-    csr_tiling_gemv_gpu(m_, n_, A_host, X_host, csr_tiling_kernel_Y_host);
-
     // wsp v0
     float *wsp0_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
     Y_gpu_hosts.push_back(wsp0_kernel_Y_host);
@@ -104,6 +98,12 @@ auto SparseSgemvTester::SgemvGPU() -> void {
     Y_gpu_hosts.push_back(asp2_kernel_Y_host);
     std::cout << "start to launch asp v2 kernel" << std::endl;
     asp_gemv_gpu(m_, n_, A_host, X_host, asp2_kernel_Y_host, 2);
+
+    // awsp
+    float *awsp0_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
+    Y_gpu_hosts.push_back(awsp0_kernel_Y_host);
+    std::cout << "start to launch awsp v0 kernel" << std::endl;
+    awsp_gemv_gpu(m_, n_, A_host, X_host, awsp0_kernel_Y_host, 0);
 }
 
 auto SparseSgemvTester::CompareY() -> void {

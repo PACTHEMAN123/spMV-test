@@ -19,6 +19,7 @@ add_executable(sparse_sgemv
   src/tcsr.cpp
   src/wsp.cpp
   src/asp.cpp
+  src/awsp.cpp
   src/kernels/cublas.cu
   src/kernels/naive.cu
   src/kernels/tiling_smem.cu
@@ -26,6 +27,7 @@ add_executable(sparse_sgemv
   src/kernels/csr_tiling.cu
   src/kernels/wsp.cu
   src/kernels/asp.cu
+  src/kernels/awsp.cu
 )
 
 target_link_libraries(sparse_sgemv PRIVATE 

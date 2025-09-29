@@ -99,6 +99,7 @@ __global__ void wsp_kernel_v1(
         stage ^= 1;
 
         // main loop
+        #pragma unroll
         for (int i = 0; i < 31; i++) {
 
             // compute
@@ -127,6 +128,7 @@ __global__ void wsp_kernel_v1(
         }
     }
 
+    #pragma unroll
     for (int i = 16; i >= 1; i >>= 1) {
         sum += __shfl_xor_sync(0xffffffff, sum, i);
     }
