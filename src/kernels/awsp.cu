@@ -59,6 +59,129 @@ __global__ void awsp_kernel_v0(
     }
 }
 
+// version1: add one more pipeline stage
+__global__ void awsp_kernel_v1(
+    int M, int N,
+    int nz_bk_max,
+    uint32_t *bitmaps,
+    float* A_vals,
+    float *X, float *Y
+) {
+    int lane_id = threadIdx.x % 32;
+    int warp_id = threadIdx.x / 32;
+
+    uint32_t curr_mask = (1u << lane_id);
+    uint32_t prev_mask = (lane_id == 0) ? 0 : ((1u << lane_id) - 1);
+
+    float sum = 0;
+    float *X_ptr = X + M/4*warp_id + lane_id;
+    float *A_ptr = A_vals + (blockIdx.x*M/32 + M/32*warp_id/4) * nz_bk_max;
+    uint32_t *B_ptr = bitmaps + (blockIdx.x*M/32 + M/32*warp_id/4) * 32 + lane_id;
+
+    // pipeline buffers
+    float X_buf[3]; // compute stage and load stage
+    uint32_t B_buf[3]; // compute stage and load stage
+    float A_buf[32]; // only use to compute
+
+    // head stage 0: load the x and bitmap for compute
+    X_buf[0] = *X_ptr; X_ptr += 32;
+    B_buf[0] = *B_ptr; B_ptr += 32;
+    // head stage 1: load x and bitmap for next load
+    X_buf[1] = X_buf[0]; X_buf[0] = *X_ptr; X_ptr += 32;
+    B_buf[1] = B_buf[0]; B_buf[0] = *B_ptr; B_ptr += 32;
+    // head stage 2: load A for compute
+    int first_bk_offset = 0;
+    for (int i = 0; i < 32; i++) {
+        float cur_x = __shfl_sync(0xffffffff, X_buf[1], i);
+        uint32_t cur_bitmap = __shfl_sync(0xffffffff, B_buf[1], i);
+        if (cur_x != 0.0f) {
+            if (cur_bitmap & curr_mask) {
+                int A_val_row_offset = __popc(cur_bitmap & prev_mask);
+                A_buf[i] = A_ptr[first_bk_offset + A_val_row_offset];
+            } else {
+                A_buf[i] = 0.0f;
+            }
+        }
+        first_bk_offset += __popc(cur_bitmap);
+    }
+    A_ptr += nz_bk_max;
+    
+    // main pipeline
+    for (int out_bk = 0; out_bk < (M/4 - 32*2); out_bk += 32) {
+        // load the x and bitmap for next load
+        X_buf[2] = X_buf[1]; X_buf[1] = X_buf[0]; X_buf[0] = *X_ptr; X_ptr += 32;
+        B_buf[2] = B_buf[1]; B_buf[1] = B_buf[0]; B_buf[0] = *B_ptr; B_ptr += 32;
+
+        int next_bk_offset = 0;
+        for (int i = 0; i < 32; i++) {
+            // consume bufferd A
+            float x_calc = __shfl_sync(0xffffffff, X_buf[2], i);
+            float a = A_buf[i];
+            // todo: branch or not ?
+            sum += a * x_calc;
+
+            // load new A
+            float x_load = __shfl_sync(0xffffffff, X_buf[1], i);
+            uint32_t b_load = __shfl_sync(0xffffffff, B_buf[1], i);
+            if (x_load != 0.0f) {
+                if (b_load & curr_mask) {
+                    int A_val_row_offset = __popc(b_load & prev_mask);
+                    A_buf[i] = A_ptr[next_bk_offset + A_val_row_offset];
+                } else {
+                    A_buf[i] = 0.0f;
+                }
+            }
+            next_bk_offset += __popc(b_load);
+        }
+        A_ptr += nz_bk_max;
+    }
+
+    // tail stage
+    // tail stage 0 (no need to load new x and bitmap)
+    X_buf[2] = X_buf[1]; X_buf[1] = X_buf[0];
+    B_buf[2] = B_buf[1]; B_buf[1] = B_buf[0];
+    int last2_bk_offset = 0;
+    for (int i = 0; i < 32; i++) {
+        float x_calc = __shfl_sync(0xffffffff, X_buf[2], i);
+        float a = A_buf[i];
+        sum += a * x_calc;
+
+        float x_load = __shfl_sync(0xffffffff, X_buf[1], i);
+        uint32_t b_load = __shfl_sync(0xffffffff, B_buf[1], i);
+        if (x_load != 0.0f) {
+            if (b_load & curr_mask) {
+                int A_val_row_offset = __popc(b_load & prev_mask);
+                A_buf[i] = A_ptr[last2_bk_offset + A_val_row_offset];
+            } else {
+                A_buf[i] = 0.0f;
+            }
+        }
+        last2_bk_offset += __popc(b_load);
+    }
+    // tail stage 1 (no need to load new x)
+    X_buf[2] = X_buf[1];
+    B_buf[2] = B_buf[1];
+    for (int i = 0; i < 32; i++) {
+        float x_calc = __shfl_sync(0xffffffff, X_buf[2], i);
+        float a = A_buf[i];
+        sum += a * x_calc;
+    }
+
+    // reduction
+    __shared__ float reduce_sum[3][32];
+    if (warp_id != 0)
+        reduce_sum[warp_id - 1][lane_id] = sum;
+    __syncthreads();
+
+    if (warp_id == 0) {
+        for (int i = 0; i < 3; i++) {
+            sum += reduce_sum[i][lane_id];
+        }
+        Y[blockIdx.x * 32 + lane_id] = sum;
+    }
+}
+
+
 void awsp_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_host, int version) {
     dim3 block(128, 1, 1);
     dim3 grid(N / 32, 1, 1);
@@ -90,6 +213,15 @@ void awsp_gemv_gpu(int M, int N, float *A_host, float *X_host, float *Y_host, in
     {
         case 0:
             TIME_KERNEL((awsp_kernel_v0<<<grid, block>>>(
+                M, N, 
+                awsp.nz_bk_max_,
+                A_bmp_dev,
+                A_val_dev,
+                X_device, Y_device
+            )));
+            break;
+        case 1:
+            TIME_KERNEL((awsp_kernel_v1<<<grid, block>>>(
                 M, N, 
                 awsp.nz_bk_max_,
                 A_bmp_dev,
