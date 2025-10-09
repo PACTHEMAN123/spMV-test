@@ -1,5 +1,7 @@
 #include "tester.hpp"
 #include "kernel.hpp"
+#include <functional>
+#include <string>
 
 SparseSgemvTester::SparseSgemvTester(int m, int n)
     : m_(m), n_(n) {
@@ -15,8 +17,8 @@ auto SparseSgemvTester::RunTest() -> void {
 
     GetRandomMatrix();
     GetRandomVector();
-    GetCompressedMatrix();
-    GenerateBitMap();
+    // GetCompressedMatrix();
+    // GenerateBitMap();
     // Print();
 
     std::cout << "======== CPU start ======\n";
@@ -44,78 +46,28 @@ auto SparseSgemvTester::SgemvCPU() -> void {
 
 auto SparseSgemvTester::SgemvGPU() -> void {
     // register host and run kernels
+    struct KernelEntry {
+        std::string name;
+        std::function<void(float*)> gemv_kernel;
+    };
 
-    // naive
-    float *naive_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
-    Y_gpu_hosts.push_back(naive_kernel_Y_host);
-    std::cout << "start to launch naive kernel" << std::endl;
-    naive_gemv_gpu(m_, n_, A_host, X_host, naive_kernel_Y_host);
+    std::vector<KernelEntry> kernels = {
+        {"cublas", [&](float* y){ cublas_gemv_gpu(m_, n_, A_host, X_host, y); }},
+        {"wsp0",   [&](float* y){ wsp_gemv_gpu(m_, n_, A_host, X_host, y, 0); }},
+        {"wsp1",   [&](float* y){ wsp_gemv_gpu(m_, n_, A_host, X_host, y, 1); }},
+        {"asp2",   [&](float* y){ asp_gemv_gpu(m_, n_, A_host, X_host, y, 2); }},
+        {"awsp0",  [&](float* y){ awsp_gemv_gpu(m_, n_, A_host, X_host, y, 0); }},
+        {"awsp1",  [&](float* y){ awsp_gemv_gpu(m_, n_, A_host, X_host, y, 1); }},
+        {"awsp2",  [&](float* y){ awsp_gemv_gpu(m_, n_, A_host, X_host, y, 2); }},
+    };
 
-    // cublas
-    float *cublas_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
-    Y_gpu_hosts.push_back(cublas_kernel_Y_host);
-    std::cout << "start to launch cublas kernel" << std::endl;
-    cublas_gemv_gpu(m_, n_, A_host, X_host, cublas_kernel_Y_host);
 
-    // tiling + share mem
-    float *tiling_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
-    Y_gpu_hosts.push_back(tiling_kernel_Y_host);
-    std::cout << "start to launch tiling kernel" << std::endl;
-    tiling_gemv_gpu(m_, n_, A_host, X_host, tiling_kernel_Y_host);
-
-    // naive csr
-    float *csr_naive_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
-    Y_gpu_hosts.push_back(csr_naive_kernel_Y_host);
-    std::cout << "start to launch csr naive kernel" << std::endl;
-    csr_naive_gemv_gpu(m_, n_, A_host, X_host, csr_naive_kernel_Y_host);
-
-    // wsp v0
-    float *wsp0_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
-    Y_gpu_hosts.push_back(wsp0_kernel_Y_host);
-    std::cout << "start to launch wsp0 kernel" << std::endl;
-    wsp_gemv_gpu(m_, n_, A_host, X_host, wsp0_kernel_Y_host, 0);
-
-    // wsp v1
-    float *wsp1_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
-    Y_gpu_hosts.push_back(wsp1_kernel_Y_host);
-    std::cout << "start to launch wsp1 kernel" << std::endl;
-    wsp_gemv_gpu(m_, n_, A_host, X_host, wsp1_kernel_Y_host, 1);
-
-    // asp v0
-    float *asp0_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
-    Y_gpu_hosts.push_back(asp0_kernel_Y_host);
-    std::cout << "start to launch asp v0 kernel" << std::endl;
-    asp_gemv_gpu(m_, n_, A_host, X_host, asp0_kernel_Y_host, 0);
-
-    // asp v1
-    float *asp1_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
-    Y_gpu_hosts.push_back(asp1_kernel_Y_host);
-    std::cout << "start to launch asp v1 kernel" << std::endl;
-    asp_gemv_gpu(m_, n_, A_host, X_host, asp1_kernel_Y_host, 1);
-
-    // asp v2
-    float *asp2_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
-    Y_gpu_hosts.push_back(asp2_kernel_Y_host);
-    std::cout << "start to launch asp v2 kernel" << std::endl;
-    asp_gemv_gpu(m_, n_, A_host, X_host, asp2_kernel_Y_host, 2);
-
-    // awsp
-    float *awsp0_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
-    Y_gpu_hosts.push_back(awsp0_kernel_Y_host);
-    std::cout << "start to launch awsp v0 kernel" << std::endl;
-    awsp_gemv_gpu(m_, n_, A_host, X_host, awsp0_kernel_Y_host, 0);
-
-    // awsp v1
-    float *awsp1_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
-    Y_gpu_hosts.push_back(awsp1_kernel_Y_host);
-    std::cout << "start to launch awsp v1 kernel" << std::endl;
-    awsp_gemv_gpu(m_, n_, A_host, X_host, awsp1_kernel_Y_host, 1);
-
-    // awsp v2
-    float *awsp2_kernel_Y_host = (float *)malloc(1 * n_ * sizeof(float));
-    Y_gpu_hosts.push_back(awsp2_kernel_Y_host);
-    std::cout << "start to launch awsp v2 kernel" << std::endl;
-    awsp_gemv_gpu(m_, n_, A_host, X_host, awsp2_kernel_Y_host, 2);
+    for (auto& k : kernels) {
+        std::cout << "start to launch " << k.name << " kernel" << std::endl;
+        float* y_host = (float*)malloc(n_ * sizeof(float));
+        Y_gpu_hosts.push_back(y_host);
+        k.gemv_kernel(y_host);
+    }
 }
 
 auto SparseSgemvTester::CompareY() -> void {

@@ -12,23 +12,13 @@ endif()
 
 find_package(CUDAToolkit REQUIRED)
 
-add_executable(sparse_sgemv
-  test/main.cpp
-  src/tester.cpp
-  src/matrix_csr.cpp
-  src/tcsr.cpp
-  src/wsp.cpp
-  src/asp.cpp
-  src/awsp.cpp
-  src/kernels/cublas.cu
-  src/kernels/naive.cu
-  src/kernels/tiling_smem.cu
-  src/kernels/csr_naive.cu
-  src/kernels/csr_tiling.cu
-  src/kernels/wsp.cu
-  src/kernels/asp.cu
-  src/kernels/awsp.cu
+file(GLOB_RECURSE SRC_FILES
+  src/*.cpp
+  src/*.cu
+  test/*.cpp
 )
+
+add_executable(sparse_sgemv ${SRC_FILES})
 
 target_link_libraries(sparse_sgemv PRIVATE 
   CUDA::cudart

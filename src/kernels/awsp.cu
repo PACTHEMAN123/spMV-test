@@ -93,16 +93,16 @@ __global__ void awsp_kernel_v1(
     // head stage 2: load A for compute
     int first_bk_offset = 0;
     for (int i = 0; i < 32; i++) {
-        // float cur_x = __shfl_sync(0xffffffff, X_buf[1], i);
+        float cur_x = __shfl_sync(0xffffffff, X_buf[1], i);
         uint32_t cur_bitmap = __shfl_sync(0xffffffff, B_buf[1], i);
-        // if (cur_x != 0.0f) {
+        if (cur_x != 0.0f) {
             if (cur_bitmap & curr_mask) {
                 int A_val_row_offset = __popc(cur_bitmap & prev_mask);
                 A_buf[i] = A_ptr[first_bk_offset + A_val_row_offset];
             } else {
                 A_buf[i] = 0.0f;
             }
-        // }
+        }
         first_bk_offset += __popc(cur_bitmap);
     }
     A_ptr += nz_bk_max;
@@ -122,16 +122,16 @@ __global__ void awsp_kernel_v1(
             sum += a * x_calc;
 
             // load new A
-            // float x_load = __shfl_sync(0xffffffff, X_buf[1], i);
+            float x_load = __shfl_sync(0xffffffff, X_buf[1], i);
             uint32_t b_load = __shfl_sync(0xffffffff, B_buf[1], i);
-            // if (x_load != 0.0f) {
+            if (x_load != 0.0f) {
                 if (b_load & curr_mask) {
                     int A_val_row_offset = __popc(b_load & prev_mask);
                     A_buf[i] = A_ptr[next_bk_offset + A_val_row_offset];
                 } else {
                     A_buf[i] = 0.0f;
                 }
-            // }
+            }
             next_bk_offset += __popc(b_load);
         }
         A_ptr += nz_bk_max;
@@ -147,16 +147,16 @@ __global__ void awsp_kernel_v1(
         float a = A_buf[i];
         sum += a * x_calc;
 
-        // float x_load = __shfl_sync(0xffffffff, X_buf[1], i);
+        float x_load = __shfl_sync(0xffffffff, X_buf[1], i);
         uint32_t b_load = __shfl_sync(0xffffffff, B_buf[1], i);
-        // if (x_load != 0.0f) {
+        if (x_load != 0.0f) {
             if (b_load & curr_mask) {
                 int A_val_row_offset = __popc(b_load & prev_mask);
                 A_buf[i] = A_ptr[last2_bk_offset + A_val_row_offset];
             } else {
                 A_buf[i] = 0.0f;
             }
-        // }
+        }
         last2_bk_offset += __popc(b_load);
     }
     // tail stage 1 (no need to load new x)
@@ -220,17 +220,18 @@ __global__ void awsp_kernel_v2(
     #pragma unroll
     for (int idx = 0; idx < 2; idx++) {
         int first_bk_offset = 0;
+        #pragma unroll
         for (int i = 0; i < 32; i++) {
-            // float cur_x = __shfl_sync(0xffffffff, X_buf[idx][1], i);
+            float cur_x = __shfl_sync(0xffffffff, X_buf[idx][1], i);
             uint32_t cur_bitmap = __shfl_sync(0xffffffff, B_buf[idx][1], i);
-            // if (cur_x != 0.0f) {
+            if (cur_x != 0.0f) {
                 if (cur_bitmap & curr_mask) {
                     int A_val_row_offset = __popc(cur_bitmap & prev_mask);
                     A_buf[idx][i] = A_ptr[nz_bk_max*idx + first_bk_offset + A_val_row_offset];
                 } else {
                     A_buf[idx][i] = 0.0f;
                 }
-            // }
+            }
             first_bk_offset += __popc(cur_bitmap);
         }
     }
@@ -246,24 +247,26 @@ __global__ void awsp_kernel_v2(
         #pragma unroll
         for (int idx = 0; idx < 2; idx++) {
             int next_bk_offset = 0;
+            #pragma unroll
             for (int i = 0; i < 32; i++) {
                 // consume bufferd A
                 float x_calc = __shfl_sync(0xffffffff, X_buf[idx][2], i);
                 float a = A_buf[idx][i];
                 // todo: branch or not ?
-                sum += a * x_calc;
+                if (x_calc != 0)
+                    sum += a * x_calc;
 
                 // load new A
-                // float x_load = __shfl_sync(0xffffffff, X_buf[idx][1], i);
+                float x_load = __shfl_sync(0xffffffff, X_buf[idx][1], i);
                 uint32_t b_load = __shfl_sync(0xffffffff, B_buf[idx][1], i);
-                // if (x_load != 0.0f) {
+                if (x_load != 0.0f) {
                     if (b_load & curr_mask) {
                         int A_val_row_offset = __popc(b_load & prev_mask);
                         A_buf[idx][i] = A_ptr[nz_bk_max*idx + next_bk_offset + A_val_row_offset];
                     } else {
                         A_buf[idx][i] = 0.0f;
                     }
-                // }
+                }
                 next_bk_offset += __popc(b_load);
             }
         }  
@@ -279,21 +282,22 @@ __global__ void awsp_kernel_v2(
     #pragma unroll
     for (int idx = 0; idx < 2; idx++) {
         int last_bk_offset = 0;
+        #pragma unroll
         for (int i = 0; i < 32; i++) {
             float x_calc = __shfl_sync(0xffffffff, X_buf[idx][2], i);
             float a = A_buf[idx][i];
             sum += a * x_calc;
 
-            // float x_load = __shfl_sync(0xffffffff, X_buf[idx][1], i);
+            float x_load = __shfl_sync(0xffffffff, X_buf[idx][1], i);
             uint32_t b_load = __shfl_sync(0xffffffff, B_buf[idx][1], i);
-            // if (x_load != 0.0f) {
+            if (x_load != 0.0f) {
                 if (b_load & curr_mask) {
                     int A_val_row_offset = __popc(b_load & prev_mask);
                     A_buf[idx][i] = A_ptr[nz_bk_max*idx + last_bk_offset + A_val_row_offset];
                 } else {
                     A_buf[idx][i] = 0.0f;
                 }
-            // }
+            }
             last_bk_offset += __popc(b_load);
         }
     }
@@ -303,7 +307,9 @@ __global__ void awsp_kernel_v2(
     X_buf[1][2] = X_buf[1][1];
     B_buf[0][2] = B_buf[0][1];
     B_buf[1][2] = B_buf[1][1];
+    #pragma unroll
     for (int idx = 0; idx < 2; idx++) {
+        #pragma unroll
         for (int i = 0; i < 32; i++) {
             float x_calc = __shfl_sync(0xffffffff, X_buf[idx][2], i);
             float a = A_buf[idx][i];
