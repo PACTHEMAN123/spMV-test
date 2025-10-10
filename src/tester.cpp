@@ -59,6 +59,7 @@ auto SparseSgemvTester::SgemvGPU() -> void {
         {"awsp0",  [&](float* y){ awsp_gemv_gpu(m_, n_, A_host, X_host, y, 0); }},
         {"awsp1",  [&](float* y){ awsp_gemv_gpu(m_, n_, A_host, X_host, y, 1); }},
         {"awsp2",  [&](float* y){ awsp_gemv_gpu(m_, n_, A_host, X_host, y, 2); }},
+        {"awsp_ref",  [&](float* y){ awsp_ref_gemv_gpu(m_, n_, A_host, X_host, y); }},
     };
 
 
