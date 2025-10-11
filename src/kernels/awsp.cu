@@ -224,14 +224,9 @@ __global__ void awsp_kernel_v2(
         for (int i = 0; i < 32; i++) {
             float cur_x = __shfl_sync(0xffffffff, X_buf[idx][1], i);
             uint32_t cur_bitmap = __shfl_sync(0xffffffff, B_buf[idx][1], i);
-            if (cur_x != 0.0f) {
-                if (cur_bitmap & curr_mask) {
-                    int A_val_row_offset = __popc(cur_bitmap & prev_mask);
-                    A_buf[idx][i] = A_ptr[nz_bk_max*idx + first_bk_offset + A_val_row_offset];
-                } else {
-                    A_buf[idx][i] = 0.0f;
-                }
-            }
+            int A_val_row_offset = __popc(cur_bitmap & prev_mask);
+            bool is_load = cur_x != 0.0f && (cur_bitmap & curr_mask);
+            A_buf[idx][i] = is_load ? A_ptr[nz_bk_max*idx + first_bk_offset + A_val_row_offset] : 0;
             first_bk_offset += __popc(cur_bitmap);
         }
     }
@@ -259,14 +254,9 @@ __global__ void awsp_kernel_v2(
                 // load new A
                 float x_load = __shfl_sync(0xffffffff, X_buf[idx][1], i);
                 uint32_t b_load = __shfl_sync(0xffffffff, B_buf[idx][1], i);
-                if (x_load != 0.0f) {
-                    if (b_load & curr_mask) {
-                        int A_val_row_offset = __popc(b_load & prev_mask);
-                        A_buf[idx][i] = A_ptr[nz_bk_max*idx + next_bk_offset + A_val_row_offset];
-                    } else {
-                        A_buf[idx][i] = 0.0f;
-                    }
-                }
+                int A_val_row_offset = __popc(b_load & prev_mask);
+                bool is_load = x_load != 0.0f && (b_load & curr_mask);
+                A_buf[idx][i] = is_load ? A_ptr[nz_bk_max*idx + next_bk_offset + A_val_row_offset] : 0;
                 next_bk_offset += __popc(b_load);
             }
         }  
@@ -290,14 +280,9 @@ __global__ void awsp_kernel_v2(
 
             float x_load = __shfl_sync(0xffffffff, X_buf[idx][1], i);
             uint32_t b_load = __shfl_sync(0xffffffff, B_buf[idx][1], i);
-            if (x_load != 0.0f) {
-                if (b_load & curr_mask) {
-                    int A_val_row_offset = __popc(b_load & prev_mask);
-                    A_buf[idx][i] = A_ptr[nz_bk_max*idx + last_bk_offset + A_val_row_offset];
-                } else {
-                    A_buf[idx][i] = 0.0f;
-                }
-            }
+            int A_val_row_offset = __popc(b_load & prev_mask);
+            bool is_load = x_load != 0.0f && (b_load & curr_mask);
+            A_buf[idx][i] = is_load ? A_ptr[nz_bk_max*idx + last_bk_offset + A_val_row_offset] : 0;
             last_bk_offset += __popc(b_load);
         }
     }
