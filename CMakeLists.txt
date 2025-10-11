@@ -26,7 +26,7 @@ target_link_libraries(sparse_sgemv PRIVATE
 )
 
 target_compile_options(sparse_sgemv PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:-g>
+#    $<$<COMPILE_LANGUAGE:CUDA>:-O3>
     $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
 )
 

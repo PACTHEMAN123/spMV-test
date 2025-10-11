@@ -17,6 +17,6 @@ echo "  报告文件: ${REPORT_FILE}"
 # 调用 ncu
 rm ${REPORT_FILE}
 sudo -v
-sudo /usr/local/cuda/nsight-compute-2025.1.0/ncu --import-source yes -o ${REPORT_FILE} -f --set full ${EXE_PATH}
+sudo -E CUDA_VISIBLE_DEVICES=2 /usr/local/cuda/nsight-compute-2025.1.0/ncu --import-source yes -o ${REPORT_FILE} -f --set full ${EXE_PATH}
 
 echo "完成 ✅ 报告已保存到 ${REPORT_FILE}"
